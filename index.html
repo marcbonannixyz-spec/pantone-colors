@@ -128,24 +128,52 @@
       </div>
     </div>
 <script>
-const pantoneList = [
-  { name: "Egret", hex: "F3ECE0" },
-  { name: "Snow White", hex: "F2F0EB" },
-  { name: "Bright White", hex: "F4F5F0" },
-  { name: "Cloud Dancer", hex: "F0EEE9" },
-  { name: "Gardenia", hex: "F1E8DF" },
-  { name: "Marshmallow", hex: "F0EEE4" },
-  { name: "Blazing Yellow", hex: "FEE715" },
-  { name: "Classic Blue", hex: "0F4C81" },
-  { name: "Living Coral", hex: "FF6F61" },
-  { name: "Ultra Violet", hex: "5F4B8B" },
-  { name: "Greenery", hex: "88B04B" },
-  { name: "Rose Quartz", hex: "F7CAC9" },
-  { name: "Serenity", hex: "92A8D1" },
-  { name: "Marsala", hex: "955251" },
-  { name: "Radiant Orchid", hex: "B163A3" },
-  { name: "Tangerine Tango", hex: "DD4124" }
-];
+const pantoneList = (() => {
+  const hueNames = [
+    "Red","Red-Orange","Orange","Amber","Yellow","Lime",
+    "Green","Emerald","Teal","Cyan","Sky","Blue",
+    "Indigo","Violet","Purple","Magenta","Pink","Rose",
+    "Brick","Terracotta","Sand","Olive","Moss","Forest",
+    "Sea","Denim","Navy","Plum","Wine","Charcoal"
+  ];
+
+  function hslToHex(h, s, l) {
+    s /= 100; l /= 100;
+    const c = (1 - Math.abs(2*l - 1)) * s;
+    const x = c * (1 - Math.abs(((h/60) % 2) - 1));
+    const m = l - c/2;
+    let r=0,g=0,b=0;
+    if (h < 60) [r,g,b] = [c,x,0];
+    else if (h < 120) [r,g,b] = [x,c,0];
+    else if (h < 180) [r,g,b] = [0,c,x];
+    else if (h < 240) [r,g,b] = [0,x,c];
+    else if (h < 300) [r,g,b] = [x,0,c];
+    else [r,g,b] = [c,0,x];
+
+    const toHex = (v) => Math.round((v+m)*255).toString(16).padStart(2,"0");
+    return (toHex(r)+toHex(g)+toHex(b)).toUpperCase();
+  }
+
+  const list = [];
+  const sats = [40,50,60,70,80,90];
+  const lits = [30,40,50,60];
+  const hueSteps = 30;
+  const hueSpan = 360 / hueSteps;
+  let id = 1;
+
+  for (let i=0; i<hueSteps; i++) {
+    const baseHue = Math.round(i*hueSpan);
+    const hueLabel = hueNames[i] || `Hue ${i+1}`;
+    for (const s of sats) for (const l of lits) {
+      const h = (baseHue + (s-40)*0.15 + (l-30)*0.2) % 360;
+      const hex = hslToHex(h, s, l);
+      const code = String(id).padStart(3,"0");
+      list.push({ name: `Studio ${hueLabel} ${code}`, hex });
+      id++;
+    }
+  }
+  return list;
+})();
 
 const LS_MAP = "nameToPantoneColor_v1";
 const LS_DECK = "pantoneDeck_v1";
@@ -274,3 +302,4 @@ ensureDeck();
 setStatus(`Loaded ${pantoneList.length} colors. Ready.`);
 </script>
     
+
