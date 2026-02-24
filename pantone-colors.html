@@ -1,0 +1,317 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Name → Pantone Color</title>
+    <style>
+      :root {
+        --border: #d0d0d0;
+        --text: #1a1a1a;
+        --muted: #666;
+      }
+      body {
+        font-family: system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif;
+        color: var(--text);
+        margin: 0;
+        padding: 24px;
+        background: #fff;
+      }
+      .wrap {
+        max-width: 720px;
+        margin: 0 auto;
+      }
+      h1 {
+        margin: 0 0 8px 0;
+        font-size: 22px;
+      }
+      p {
+        margin: 0 0 16px 0;
+        color: var(--muted);
+      }
+      .row {
+        display: flex;
+        gap: 10px;
+        flex-wrap: wrap;
+        align-items: center;
+        margin-bottom: 14px;
+      }
+      input[type="text"] {
+        flex: 1;
+        min-width: 220px;
+        padding: 10px 12px;
+        font-size: 16px;
+        border: 1px solid var(--border);
+        border-radius: 10px;
+      }
+      button {
+        padding: 10px 14px;
+        font-size: 16px;
+        border: 1px solid var(--border);
+        background: #f7f7f7;
+        border-radius: 10px;
+        cursor: pointer;
+      }
+      button:hover { background: #f0f0f0; }
+      .card {
+        border: 1px solid var(--border);
+        border-radius: 14px;
+        padding: 14px;
+        display: flex;
+        gap: 14px;
+        align-items: center;
+      }
+      /* Exactly 1 inch square */
+      .swatch {
+        width: 1in;
+        height: 1in;
+        border: 1px solid var(--border);
+        border-radius: 10px;
+        background: #fff;
+      }
+      .meta {
+        display: grid;
+        gap: 4px;
+      }
+      .label {
+        font-size: 13px;
+        color: var(--muted);
+      }
+      .value {
+        font-size: 16px;
+        font-weight: 600;
+      }
+      .tiny {
+        font-size: 12px;
+        color: var(--muted);
+        margin-top: 10px;
+      }
+      .status {
+        font-size: 13px;
+        color: var(--muted);
+        margin-top: 10px;
+      }
+      .danger { color: #b00020; }
+      code {
+        font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="wrap">
+      <h1>Name → Pantone Color</h1>
+      <p>Type a first name. Same name always returns the same color (case-insensitive). New names draw from a shuffled deck of Pantone colors.</p>
+
+      <div class="row">
+        <input id="nameInput" type="text" placeholder="e.g., Margaret" autocomplete="off" />
+        <button id="goBtn">Get color</button>
+        <button id="resetBtn" title="Clears saved name→color assignments and reshuffles the deck">Reset</button>
+      </div>
+
+      <div class="card" aria-live="polite">
+        <div id="swatch" class="swatch"></div>
+        <div class="meta">
+          <div class="label">Name</div>
+          <div id="shownName" class="value">—</div>
+
+          <div class="label">Pantone</div>
+          <div id="shownPantone" class="value">—</div>
+
+          <div class="label">HEX</div>
+          <div id="shownHex" class="value">—</div>
+        </div>
+      </div>
+
+      <div id="status" class="status">Loading Pantone list…</div>
+      <div class="tiny">
+        Data: <code>pantone-colors.json</code> (community reference values, not official Pantone digital standards).
+      </div>
+    </div>
+
+    <script>
+      // Public JSON with ~2310 Pantone names + hex values
+      // Source: Margaret2/pantone-colors (same dataset used by margaret2.github.io/pantone-colors/)
+      const PANTONE_JSON_URL =
+        "https://raw.githubusercontent.com/Margaret2/pantone-colors/master/pantone-colors.json";
+
+      // localStorage keys
+      const LS_MAP = "nameToPantoneColor_v1";   // { "margaret": { name, hex } , ... }
+      const LS_DECK = "pantoneDeck_v1";         // [indices...]
+      const LS_PTR = "pantoneDeckPtr_v1";       // number
+
+      let pantoneList = [];
+
+      const els = {
+        input: document.getElementById("nameInput"),
+        go: document.getElementById("goBtn"),
+        reset: document.getElementById("resetBtn"),
+        swatch: document.getElementById("swatch"),
+        shownName: document.getElementById("shownName"),
+        shownPantone: document.getElementById("shownPantone"),
+        shownHex: document.getElementById("shownHex"),
+        status: document.getElementById("status"),
+      };
+
+      function normalizeName(raw) {
+        return (raw || "").trim().toLowerCase();
+      }
+
+      function loadMap() {
+        try { return JSON.parse(localStorage.getItem(LS_MAP) || "{}"); }
+        catch { return {}; }
+      }
+
+      function saveMap(map) {
+        localStorage.setItem(LS_MAP, JSON.stringify(map));
+      }
+
+      function getDeck() {
+        try { return JSON.parse(localStorage.getItem(LS_DECK) || "null"); }
+        catch { return null; }
+      }
+
+      function setDeck(deck) {
+        localStorage.setItem(LS_DECK, JSON.stringify(deck));
+      }
+
+      function getPtr() {
+        const v = localStorage.getItem(LS_PTR);
+        const n = Number(v);
+        return Number.isFinite(n) ? n : 0;
+      }
+
+      function setPtr(n) {
+        localStorage.setItem(LS_PTR, String(n));
+      }
+
+      function cryptoRandomInt(maxExclusive) {
+        // Uniform random integer in [0, maxExclusive)
+        const buf = new Uint32Array(1);
+        const limit = Math.floor(0x100000000 / maxExclusive) * maxExclusive;
+        let x;
+        do {
+          crypto.getRandomValues(buf);
+          x = buf[0];
+        } while (x >= limit);
+        return x % maxExclusive;
+      }
+
+      function fisherYatesShuffle(arr) {
+        for (let i = arr.length - 1; i > 0; i--) {
+          const j = cryptoRandomInt(i + 1);
+          [arr[i], arr[j]] = [arr[j], arr[i]];
+        }
+        return arr;
+      }
+
+      function ensureDeck() {
+        let deck = getDeck();
+        if (!deck || !Array.isArray(deck) || deck.length !== pantoneList.length) {
+          deck = Array.from({ length: pantoneList.length }, (_, i) => i);
+          fisherYatesShuffle(deck);
+          setDeck(deck);
+          setPtr(0);
+        }
+        return deck;
+      }
+
+      function drawNextColor() {
+        const deck = ensureDeck();
+        let ptr = getPtr();
+
+        // If exhausted, reshuffle and restart pointer
+        if (ptr >= deck.length) {
+          fisherYatesShuffle(deck);
+          setDeck(deck);
+          ptr = 0;
+          setPtr(0);
+        }
+
+        const idx = deck[ptr];
+        setPtr(ptr + 1);
+        return pantoneList[idx];
+      }
+
+      function showColor(displayName, colorObj) {
+        const hex = colorObj.hex.startsWith("#") ? colorObj.hex : ("#" + colorObj.hex);
+        els.swatch.style.background = hex;
+        els.shownName.textContent = displayName;
+        els.shownPantone.textContent = colorObj.name || "—";
+        els.shownHex.textContent = hex.toUpperCase();
+      }
+
+      function setStatus(msg, isError = false) {
+        els.status.textContent = msg;
+        els.status.classList.toggle("danger", isError);
+      }
+
+      async function loadPantones() {
+        setStatus("Loading Pantone list…");
+        const res = await fetch(PANTONE_JSON_URL, { cache: "no-cache" });
+        if (!res.ok) throw new Error("Failed to fetch pantone list");
+        const data = await res.json();
+
+        // Expect array like: [{ "name": "Egret", "hex": "F3ECE0" }, ...]
+        if (!Array.isArray(data) || !data.length) throw new Error("Unexpected pantone JSON format");
+
+        pantoneList = data.map(c => ({
+          name: String(c.name || "").trim(),
+          hex: String(c.hex || "").trim().replace(/^#/, ""),
+        })).filter(c => c.hex.length >= 6);
+
+        setStatus(`Loaded ${pantoneList.length} colors. Ready.`);
+        ensureDeck();
+      }
+
+      function handleGetColor() {
+        const raw = els.input.value;
+        const norm = normalizeName(raw);
+
+        if (!norm) {
+          setStatus("Please enter a first name.", true);
+          return;
+        }
+
+        const map = loadMap();
+        if (map[norm]) {
+          showColor(raw.trim(), map[norm]);
+          setStatus("Returned saved color for this name.");
+          return;
+        }
+
+        const color = drawNextColor();
+        map[norm] = color;
+        saveMap(map);
+
+        showColor(raw.trim(), color);
+        setStatus("Assigned a new color from the deck.");
+      }
+
+      function handleReset() {
+        localStorage.removeItem(LS_MAP);
+        localStorage.removeItem(LS_DECK);
+        localStorage.removeItem(LS_PTR);
+        if (pantoneList.length) ensureDeck();
+        showColor("—", { name: "—", hex: "FFFFFF" });
+        setStatus("Reset complete. Assignments cleared and deck reshuffled.");
+      }
+
+      // Events
+      els.go.addEventListener("click", handleGetColor);
+      els.reset.addEventListener("click", handleReset);
+      els.input.addEventListener("keydown", (e) => {
+        if (e.key === "Enter") handleGetColor();
+      });
+
+      // Init
+      (async () => {
+        try {
+          await loadPantones();
+        } catch (err) {
+          console.error(err);
+          setStatus("Could not load Pantone list. Check your connection or the JSON URL.", true);
+        }
+      })();
+    </script>
+  </body>
+</html>
